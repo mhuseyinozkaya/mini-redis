@@ -1,0 +1,25 @@
+#include <stdlib.h>
+
+#ifndef INSTRUCTIONS_H
+#define INSTRUCTIONS_H
+/*
+// Function pointer declaration
+typedef void (*InstructionPointer)(int argc, char *argv[]);
+
+typedef struct{
+    const char* func_name;
+    InstructionPointer func;
+}Instructions;
+
+// Instruction declaration these are wrapper functions will be called from main()
+void cmd_get(int argc, char *argv[]);
+void cmd_set(int argc, char *argv[]);
+void cmd_del(int argc, char *argv[]);
+void cmd_save(int argc, char *argv[]);
+void cmd_exit(int argc, char *argv[]);
+
+extern const Instructions command_table[];
+*/
+void cmd_save(Data** table,unsigned int size);
+void cmd_load(Data** table);
+#endif
