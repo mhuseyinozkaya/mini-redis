@@ -1,4 +1,6 @@
 #include <stdlib.h>
+#include <signal.h>
+#include "structure.h"
 
 #ifndef INSTRUCTIONS_H
 #define INSTRUCTIONS_H
@@ -20,6 +22,10 @@ void cmd_exit(int argc, char *argv[]);
 
 extern const Instructions command_table[];
 */
+void cmd_get(Data **table, char **args);
+void cmd_set(Data **table, char **args);
+void cmd_del(Data **table, char **args);
 void cmd_save(Data** table,unsigned int size);
 void cmd_load(Data** table);
+void cmd_exit(volatile sig_atomic_t *keep_run);
 #endif
