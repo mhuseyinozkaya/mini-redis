@@ -38,7 +38,7 @@ void to_lower(char *str){
     }
 }
 
-char **input_tokenizer(char *str, unsigned int *c)
+char **input_tokenizer(char *str, int *c)
 {
     *c = 0;
     char delims[] = " \t\n";

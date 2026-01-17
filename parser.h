@@ -25,6 +25,6 @@ void to_upper(char *str);
 void to_lower(char *str);
 
 COMMAND get_instruction(char *str);
-char **input_tokenizer(char *str, unsigned int *c);
+char **input_tokenizer(char *str, int *c);
 
 #endif

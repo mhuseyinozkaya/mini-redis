@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdbool.h>
 
+#include "server.h"
 #include "structure.h"
 #include "hash.h"
 
@@ -119,9 +120,12 @@ void append_node(Data **table, Data *node)
     table[index] = node;
 }
 
-void print_node(Data *node)
+void print_node(Data *node, struct client *cl)
 {
-    fprintf(stdout, "{ key: '%s', value: '%s' }", node->key, node->value);
+    if(cl == NULL)
+        fprintf(stdout, "{ key: '%s', value: '%s' }", node->key, node->value);
+    else
+        handle_response_message(cl, "{ key: '%s', value: '%s' }", node->key, node->value);
 }
 
 void print_table(Data **table)
@@ -134,7 +138,7 @@ void print_table(Data **table)
             Data *p = table[i];
             while (p != NULL)
             {
-                print_node(p);
+                print_node(p,NULL);
                 printf(" -> ");
                 p = p->next;
             }
