@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <stdarg.h>
 #include <string.h>
 #include <errno.h>
@@ -12,10 +13,6 @@
 #include "server.h"
 #include "parser.h"
 #include "instructions.h"
-
-#define BACKLOG 10
-
-int errno;
 
 int get_local_addr(struct addrinfo **res, char *port)
 {
@@ -109,20 +106,25 @@ int add_to_poll(struct pollfd *p, int *index, int sock, short event, int max_siz
     return 0;
 }
 
+/* Closes file descriptor of the client and */
+/* the last client element moves into the closed one */
 int remove_from_poll(struct pollfd *pfds, int i, int *pfdscount)
 {
     close(pfds[i].fd);
     pfds[i] = pfds[(*pfdscount) - 1];
-    (*pfdscount)--;
+#ifndef TEST
+    (*pfdscount)--; // Yakında kaldırılacak
+#endif
     return 0;
 }
+
 void handle_new_connection(struct pollfd *pfds, int i, int *pfdscount)
 {
     struct sockaddr_storage client_addr;
     socklen_t client_addrlen = sizeof client_addr;
 
     int clientfd = accept(pfds[i].fd, (struct sockaddr *)&client_addr, &client_addrlen);
-    if (add_to_poll(pfds, pfdscount, clientfd, (POLLIN | POLLHUP | POLLERR), BACKLOG + 1) == -1)
+    if (add_to_poll(pfds, pfdscount, clientfd, (POLLIN | POLLHUP | POLLERR), SIZE_CLIENTS) == -1)
     {
         fprintf(stderr, "Listen Queue was full\n");
         fflush(stderr);
@@ -135,35 +137,52 @@ void handle_new_connection(struct pollfd *pfds, int i, int *pfdscount)
     return;
 }
 
-int handle_response_message(struct client *cl, const char *format,...)
+int handle_response_message(struct client *cl, MSG_TYPE msg_type, const char *format, ...)
 {
+    char temp[B_SIZE];
     va_list args;
 
-    va_start(args,format);
-    vsnprintf(cl->send_buffer, B_SIZE,format,args);
+    va_start(args, format);
+    vsnprintf(temp,sizeof(temp),format,args);
     va_end(args);
 
-    cl->buffer_size = strlen(cl->send_buffer);
-    fprintf(stdout,"[Log]: message: %s, size: %d\n",cl->send_buffer,cl->buffer_size);
+    switch (msg_type)
+    {
+    case ERROR:
+        resp_simple(cl,"-",temp);
+        break;
+    case NIL:
+        cl->buffer_size = snprintf(cl->send_buffer,sizeof(cl->send_buffer),"$-1\r\n");
+        break;
+    case INFO:
+        resp_simple(cl,"+",temp);
+        break;
+    case STRING:
+        break;
+    default:
+        break;
+    }
+
+    fprintf(stdout, "[Log]: message: %s, size: %d", cl->send_buffer, cl->buffer_size);
     return 0;
 }
 
 int send_response(struct pollfd *pfds, struct client *cl)
 {
-    int ss = send(pfds->fd,cl->send_buffer,cl->buffer_size,0);
-    if(ss == -1)
+    int ss = send(pfds->fd, cl->send_buffer, cl->buffer_size, MSG_NOSIGNAL);
+    if (ss == -1)
     {
         return 1;
     }
-    if(ss < cl->buffer_size)
+    if (ss < cl->buffer_size)
     {
-        fprintf(stderr," <%d> bytes sent the client, the expected <%d>\n",ss,cl->buffer_size);
+        fprintf(stderr, " <%d> bytes sent the client, the expected <%d>\n", ss, cl->buffer_size);
         return 2;
     }
     return 0;
 }
 
-int handle_request(struct pollfd *pfds, int i, int *pfdscount, char *buffer, int b_size, Data **hash_t,struct client *cl)
+int handle_request(struct pollfd *pfds, int i, int *pfdscount, char *buffer, int b_size, Data **hash_t, struct client *cl)
 {
     memset(buffer, 0, b_size);
     int rs = recv(pfds[i].fd, buffer, b_size, 0);
@@ -195,12 +214,13 @@ int handle_request(struct pollfd *pfds, int i, int *pfdscount, char *buffer, int
     // Get instruction and perform actions
     COMMAND cmd = get_instruction(args[0]);
 
-    instruction_handler(cmd, &c, hash_t, args,cl);
+    instruction_handler(cmd, &c, hash_t, args, cl);
     // Deallocated the args in every loop
     free(args);
     return 0;
 }
-void handle_poll_events(struct pollfd *pfds, int *pfdscount, int listener,char *buffer, int b_size, Data **hash_t,struct client *cl)
+
+void handle_poll_events(struct pollfd *pfds, int *pfdscount, int listener, char *buffer, int b_size, Data **hash_t, struct client *cl)
 {
     for (int i = 0; i < (*pfdscount); i++)
     {
@@ -213,14 +233,26 @@ void handle_poll_events(struct pollfd *pfds, int *pfdscount, int listener,char *
             else
             {
                 if (handle_request(pfds, i, pfdscount, buffer, b_size, hash_t, cl) == 1)
-                {
                     i--;
-                }
                 else
-                {
-                    send_response(&pfds[i],cl);
-                }
+                    send_response(&pfds[i], cl);
             }
         }
     }
+}
+
+struct client *init_clients(int fd, int size)
+{
+    // SIZE_CLIENTS = size; // Global variable that size of array of clients
+    struct client *cls = calloc(sizeof(struct client), size);
+    cls[0].fd = fd;
+    return cls;
+}
+
+struct pollfd *init_poll(int *pfdscount, int sockfd, int size)
+{
+    struct pollfd *pfds = calloc(sizeof(struct pollfd), size);
+    // Add listener file descriptor to poll
+    add_to_poll(pfds, pfdscount, sockfd, (POLLIN | POLLHUP | POLLERR), size);
+    return pfds;
 }

@@ -34,6 +34,7 @@ Data *get_node(Data **table, char *key)
 {
     uint8_t index = get_hash_index(key, TABLE_SIZE);
     Data *p = table[index];
+    // Traverse linked list
     while (p != NULL)
     {
         if (!strcmp(p->key, key))
@@ -125,7 +126,7 @@ void print_node(Data *node, struct client *cl)
     if(cl == NULL)
         fprintf(stdout, "{ key: '%s', value: '%s' }", node->key, node->value);
     else
-        handle_response_message(cl, "{ key: '%s', value: '%s' }", node->key, node->value);
+        handle_response_message(cl,INFO, "{ key: '%s', value: '%s' }", node->key, node->value);
 }
 
 void print_table(Data **table)

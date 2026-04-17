@@ -1,8 +1,13 @@
-TARGET = redis-cli
+TARGET = redis-server
+TARGET_TEST = server-test
 
 redis:
-	gcc main.c server.c parser.c structure.c instructions.c file.c hash.c $(DEF) -o $(TARGET)
-valgrind:
-	valgrind --leak-check=full ./$(TARGET)
+	gcc -g src/main.c src/server.c src/parser.c src/structure.c src/instructions.c src/file.c src/hash.c $(DEF) -o $(TARGET)
+test:
+	gcc -g src/main.c src/server.c src/parser.c src/structure.c src/instructions.c src/file.c src/hash.c src/test.c src/utils.c -DTEST $(DEF) -o $(TARGET_TEST)
+vg:
+	valgrind --leak-check=full --track-origins=yes ./$(TARGET)
+vgtest:
+	valgrind --leak-check=full --track-origins=yes ./$(TARGET_TEST)
 clean:
 	rm $(TARGET)

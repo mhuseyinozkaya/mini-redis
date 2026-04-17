@@ -1,6 +1,6 @@
 #ifndef PARSER_H
 #define PARSER_H
-
+#include "server.h"
 enum instructions_argument_count
 {
     ARGC_GET = 1,
@@ -26,5 +26,7 @@ void to_lower(char *str);
 
 COMMAND get_instruction(char *str);
 char **input_tokenizer(char *str, int *c);
+char **redis_tokenizer(char *buffer, int recvs, int *c);
 
+int resp_simple(struct client *cl,const char* type, const char *payload);
 #endif

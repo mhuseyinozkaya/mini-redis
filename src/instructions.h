@@ -30,7 +30,7 @@ void instruction_handler(COMMAND cmd ,int *c, Data **hash_t, char **args,struct 
 void cmd_get(Data **table, char **args, struct client *cl);
 void cmd_set(Data **table, char **args, struct client *cl);
 void cmd_del(Data **table, char **args, struct client *cl);
-void cmd_save(Data** table,unsigned int size);
+void cmd_save(Data** table,unsigned int size,struct client *cl);
 void cmd_load(Data** table);
 void cmd_exit(volatile sig_atomic_t *keep_run);
 #endif
