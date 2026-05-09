@@ -13,6 +13,7 @@
 #include "server.h"
 #include "parser.h"
 #include "instructions.h"
+#include "utils.h"
 
 int get_local_addr(struct addrinfo **res, char *port)
 {
@@ -157,13 +158,16 @@ int handle_response_message(struct client *cl, MSG_TYPE msg_type, const char *fo
     case INFO:
         resp_simple(cl,"+",temp);
         break;
-    case STRING:
+    case BULK_STRING:
+        cl->buffer_size = snprintf(cl->send_buffer,sizeof(cl->send_buffer),"%s",temp);
         break;
     default:
         break;
     }
 
-    fprintf(stdout, "[Log]: message: %s, size: %d", cl->send_buffer, cl->buffer_size);
+    // fprintf(stdout, "[Send log]: message: %s, size: %d", cl->send_buffer, cl->buffer_size);
+    fprintf(stdout, "[Send log]: message: ");
+    debug_buffer(temp,0);
     return 0;
 }
 

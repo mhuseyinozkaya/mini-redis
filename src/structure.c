@@ -115,7 +115,9 @@ void append_node(Data **table, Data *node)
     unsigned int index = get_hash_index(node->key, TABLE_SIZE);
     if (table[index] != NULL)
     {
-        // fprintf(stdout, "Collision detected, node will append the same index.\n");
+#ifdef DBG
+        fprintf(stdout, "Collision detected, node will append the same index.\n");
+#endif
         node->next = table[index];
     }
     table[index] = node;
@@ -123,10 +125,15 @@ void append_node(Data **table, Data *node)
 
 void print_node(Data *node, struct client *cl)
 {
-    if(cl == NULL)
-        fprintf(stdout, "{ key: '%s', value: '%s' }", node->key, node->value);
+    size_t len_value = strlen(node->value);
+    if (cl == NULL)
+    {
+        printf("{'%s':'%s'}", node->key, node->value);
+    }
     else
-        handle_response_message(cl,INFO, "{ key: '%s', value: '%s' }", node->key, node->value);
+    {
+        handle_response_message(cl, BULK_STRING, "$%zu\r\n%s\r\n", len_value, node->value);
+    }
 }
 
 void print_table(Data **table)

@@ -47,7 +47,7 @@ typedef enum message_type{
     ERROR = -1,
     NIL,
     INFO,
-    STRING,
+    BULK_STRING,
     ARRAY
 }MSG_TYPE;
 

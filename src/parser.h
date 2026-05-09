@@ -1,6 +1,7 @@
 #ifndef PARSER_H
 #define PARSER_H
 #include "server.h"
+// struct client;
 enum instructions_argument_count
 {
     ARGC_GET = 1,
