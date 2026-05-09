@@ -9,7 +9,9 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <poll.h>
+#include <netinet/tcp.h>
 
+#include "structure.h"
 #include "server.h"
 #include "parser.h"
 #include "instructions.h"
@@ -113,24 +115,53 @@ int remove_from_poll(struct pollfd *pfds, int i, int *pfdscount)
 {
     close(pfds[i].fd);
     pfds[i] = pfds[(*pfdscount) - 1];
-#ifndef TEST
-    (*pfdscount)--; // Yakında kaldırılacak
-#endif
     return 0;
 }
 
-void handle_new_connection(struct pollfd *pfds, int i, int *pfdscount)
+int add_new_client(struct client *cl, int fd, struct sockaddr_storage cl_addr, socklen_t cl_addrlen)
+{
+    memset(cl, 0, sizeof(struct client));
+    cl->addr = cl_addr;
+    cl->addrlen = cl_addrlen;
+    cl->fd = fd;
+    return 0;
+}
+
+int remove_client(struct client *clients, int i, int *size)
+{
+    if (i != (*size - 1))
+    {
+        clients[i] = clients[(*size) - 1];
+    }
+    memset(&clients[(*size) - 1], 0, sizeof(struct client));
+    // (*size)--;
+    return 0;
+}
+
+void handle_new_connection(struct pollfd *pfds, int *pfdscount, struct client *clients)
 {
     struct sockaddr_storage client_addr;
     socklen_t client_addrlen = sizeof client_addr;
 
-    int clientfd = accept(pfds[i].fd, (struct sockaddr *)&client_addr, &client_addrlen);
+    int clientfd = accept(pfds[0].fd, (struct sockaddr *)&client_addr, &client_addrlen);
+    // TCP_NODELAY Ayarı
+    int opt = 1;
+    setsockopt(clientfd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+
     if (add_to_poll(pfds, pfdscount, clientfd, (POLLIN | POLLHUP | POLLERR), SIZE_CLIENTS) == -1)
     {
+        /* Liste dolduğu zaman genişletilecek */
         fprintf(stderr, "Listen Queue was full\n");
         fflush(stderr);
         return;
     }
+
+    if (add_new_client(&clients[(*pfdscount)-1], clientfd, client_addr, client_addrlen) != EXIT_SUCCESS)
+    {
+        fprintf(stderr, "Hata oluştu: add_new_client");
+        return;
+    }
+
     char *addr = getip_addr((struct sockaddr *)&client_addr);
     fprintf(stdout, "Connection recieved: %s %u, active connections: %d\n", addr, get_port((struct sockaddr *)&client_addr), (*pfdscount) - 1);
     fflush(stdout);
@@ -186,60 +217,69 @@ int send_response(struct pollfd *pfds, struct client *cl)
     return 0;
 }
 
-int handle_request(struct pollfd *pfds, int i, int *pfdscount, char *buffer, int b_size, Data **hash_t, struct client *cl)
+int handle_disconnect(struct pollfd *pfds, int i, int *pfdscount, struct client *cls)
 {
-    memset(buffer, 0, b_size);
-    int rs = recv(pfds[i].fd, buffer, b_size, 0);
-    if (rs < 1)
+    remove_from_poll(pfds, i, pfdscount);
+    remove_client(cls, i, pfdscount);
+    (*pfdscount)--;
+    return 0;
+}
+int handle_request(struct pollfd *pfds, int i, int *pfdscount, struct client *cls, Data **hash_t)
+{
+    cls[i].recieved_size = recv(pfds[i].fd, cls[i].recv_buf, B_SIZE, 0);
+    cls[i].recv_buf[cls[i].recieved_size] = '\0';
+#ifdef DBG
+    printf("recieved_size: %d\n",cls[i].recieved_size);
+    debug_buffer(cls[i].recv_buf,cls[i].recieved_size);
+#endif
+    if (cls[i].recieved_size < 1)
     {
-        if (remove_from_poll(pfds, i, pfdscount) == EXIT_SUCCESS)
+        if (handle_disconnect(pfds, i, pfdscount, cls) == EXIT_SUCCESS)
         {
             fprintf(stdout, "A client disconnected, active connection count: %d\n", (*pfdscount) - 1);
             fflush(stdout);
         }
         return 1;
     }
-    int c;
-    char **args = input_tokenizer(buffer, &c);
-
+    int c; /* Argüman sayısı için sayaç */
+    char **args = redis_tokenizer(cls[i].recv_buf, cls[i].recieved_size,&c);
     if (args == NULL)
         return -1;
-
-    // Convert upper the instruction name
-    to_upper(args[0]);
-
-    /* DEBUG */
+#ifdef DBG
+printf("\nargs count: %d\n",c);
     for (int i = 0; i < c; i++)
     {
-        fprintf(stdout, "<%d>. eleman <%s>\n", i, args[i]);
+        printf("args[%d]: ",i);
+        debug_buffer(args[i],100);
+        printf("\n");
         fflush(stdout);
     }
-
+#endif
+    // Convert upper the instruction name
+    to_upper(args[0]);
     // Get instruction and perform actions
     COMMAND cmd = get_instruction(args[0]);
 
-    instruction_handler(cmd, &c, hash_t, args, cl);
+    instruction_handler(cmd, &c, hash_t, args, &cls[i]);
     // Deallocated the args in every loop
-    free(args);
+    free_args_list(args,c);
     return 0;
 }
 
-void handle_poll_events(struct pollfd *pfds, int *pfdscount, int listener, char *buffer, int b_size, Data **hash_t, struct client *cl)
+void handle_poll_events(struct pollfd *pfds, int *pfdscount, struct client *clients, Data **hash_t)
 {
     for (int i = 0; i < (*pfdscount); i++)
     {
         if (pfds[i].revents & (POLLIN | POLLHUP | POLLERR))
         {
-            if (pfds[i].fd == listener)
-            {
-                handle_new_connection(pfds, i, pfdscount);
-            }
+            if (i == 0)
+                handle_new_connection(pfds, pfdscount, clients);
             else
             {
-                if (handle_request(pfds, i, pfdscount, buffer, b_size, hash_t, cl) == 1)
+                if (handle_request(pfds, i, pfdscount, clients, hash_t) == 1)
                     i--;
                 else
-                    send_response(&pfds[i], cl);
+                    send_response(&pfds[i], &clients[i]);
             }
         }
     }

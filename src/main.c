@@ -12,8 +12,6 @@
 #include "parser.h"
 #include "hash.h"
 
-#include "test.h"
-
 // Global variable for the main loop
 volatile sig_atomic_t keep_running = 1;
 
@@ -81,19 +79,8 @@ int main(int argc, char *argv[])
 
     int pfdscount = 0;
     int rv;
-#ifdef TEST
     struct client *clients = init_clients(listener, DEFAULT_MAX_CLIENTS);
     struct pollfd *pfds = init_poll(&pfdscount, listener, DEFAULT_MAX_CLIENTS);
-#else
-    // Fix that backlog
-    struct pollfd pfds[BACKLOG + 1];
-    memset(&pfds, 0, sizeof pfds);
-    add_to_poll(pfds, &pfdscount, listener, (POLLIN | POLLHUP | POLLERR), BACKLOG + 1);
-/* SERVER END */
-    int b_size = 1024;
-    char buffer[b_size];
-    struct client cl;
-#endif
     while (keep_running)
     {
         /* SERVER */
@@ -102,19 +89,11 @@ int main(int argc, char *argv[])
         {
             perror("poll() error");
         }
-#ifdef TEST
-        handle_poll_events_v2(pfds,&pfdscount,clients,hash_t);
-#else  
-        memset(&cl, 0, sizeof cl);
-        handle_poll_events(pfds, &pfdscount, listener, buffer, sizeof buffer, hash_t, &cl);
-        /* SERVER END */
-#endif
+        handle_poll_events(pfds,&pfdscount,clients,hash_t);
     }
     print_table(hash_t);
     delete_table(hash_t, TABLE_SIZE);
-#ifdef TEST
     free(clients);
     free(pfds);
-#endif
     return 0;
 }

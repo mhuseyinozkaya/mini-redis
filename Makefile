@@ -1,13 +1,13 @@
 TARGET = redis-server
 TARGET_TEST = server-test
 
-redis:
-	gcc -g src/main.c src/server.c src/parser.c src/structure.c src/instructions.c src/file.c src/hash.c $(DEF) -o $(TARGET)
+stable:
+	gcc -g src/main.c src/server.c src/parser.c src/structure.c src/instructions.c src/file.c src/hash.c src/utils.c -o $(TARGET) $(DEF) 
 test:
-	gcc -g src/main.c src/server.c src/parser.c src/structure.c src/instructions.c src/file.c src/hash.c src/test.c src/utils.c -DTEST $(DEF) -o $(TARGET_TEST)
+	gcc -g src/main.c src/server.c src/parser.c src/structure.c src/instructions.c src/file.c src/hash.c src/utils.c- o $(TARGET_TEST) -DTEST $(DEF)
 vg:
 	valgrind --leak-check=full --track-origins=yes ./$(TARGET)
 vgtest:
 	valgrind --leak-check=full --track-origins=yes ./$(TARGET_TEST)
 clean:
-	rm $(TARGET)
+	rm $(TARGET) $(TARGET_TEST)

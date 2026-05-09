@@ -64,9 +64,9 @@ unsigned short get_port(struct sockaddr *addr);
 int add_to_poll(struct pollfd *p, int *index, int sock, short event, int max_size);
 int remove_from_poll(struct pollfd *pfds, int i, int *pfdscount);
 
-void handle_new_connection(struct pollfd *pfds, int i, int *pfdscount);
-int handle_request(struct pollfd *pfds, int i, int *pfdscount, char *buffer, int b_size, Data **hash_t, struct client *cl);
-void handle_poll_events(struct pollfd *pfds, int *pfdscount, int listener, char *buffer, int b_size, Data **hash_t, struct client *cl);
+int handle_request(struct pollfd *pfds, int i, int *pfdscount, struct client *cl, Data **hash_t);
+void handle_poll_events(struct pollfd *pfds, int *pfdscount, struct client *cl, Data **hash_t);
+void handle_new_connection(struct pollfd *pfds, int *pfdscount,struct client *clients);
 
 struct client *init_clients(int fd, int size);
 struct pollfd *init_poll(int *pfdscount, int sockfd, int size);
