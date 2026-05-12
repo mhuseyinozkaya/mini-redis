@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "parser.h"
+#include "utils.h"
 #include "server.h"
 
 COMMAND get_instruction(char *str)
@@ -71,6 +72,7 @@ char **input_tokenizer(char *str, int *c)
 
 char **redis_tokenizer(char *buffer, int recvs, int *c)
 {
+    DEBUG_LOG("redis_tokenizer(): Decoding RESP...\n");
     int i;
     int number;
     char *endptr;
@@ -83,7 +85,7 @@ char **redis_tokenizer(char *buffer, int recvs, int *c)
             i = endptr - buffer;
             if(buffer[i] == '\r' && buffer[i+1] == '\n'){
                 args = malloc(sizeof(char*) * (*c));
-                printf("\nSuccessfully allocated with argcount: %d\n",*c);
+                DEBUG_LOG("Successfully allocated with argcount: %d\n",*c);
                 i+=2;
                 break;
             }

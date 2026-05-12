@@ -156,7 +156,7 @@ void handle_new_connection(struct pollfd *pfds, int *pfdscount, struct client *c
         return;
     }
 
-    if (add_new_client(&clients[(*pfdscount)-1], clientfd, client_addr, client_addrlen) != EXIT_SUCCESS)
+    if (add_new_client(&clients[(*pfdscount) - 1], clientfd, client_addr, client_addrlen) != EXIT_SUCCESS)
     {
         fprintf(stderr, "Hata oluştu: add_new_client");
         return;
@@ -175,30 +175,29 @@ int handle_response_message(struct client *cl, MSG_TYPE msg_type, const char *fo
     va_list args;
 
     va_start(args, format);
-    vsnprintf(temp,sizeof(temp),format,args);
+    vsnprintf(temp, sizeof(temp), format, args);
     va_end(args);
 
     switch (msg_type)
     {
     case ERROR:
-        resp_simple(cl,"-",temp);
+        resp_simple(cl, "-", temp);
         break;
     case NIL:
-        cl->buffer_size = snprintf(cl->send_buffer,sizeof(cl->send_buffer),"$-1\r\n");
+        cl->buffer_size = snprintf(cl->send_buffer, sizeof(cl->send_buffer), "$-1\r\n");
         break;
     case INFO:
-        resp_simple(cl,"+",temp);
+        resp_simple(cl, "+", temp);
         break;
     case BULK_STRING:
-        cl->buffer_size = snprintf(cl->send_buffer,sizeof(cl->send_buffer),"%s",temp);
+        cl->buffer_size = snprintf(cl->send_buffer, sizeof(cl->send_buffer), "%s", temp);
         break;
     default:
         break;
     }
 
-    // fprintf(stdout, "[Send log]: message: %s, size: %d", cl->send_buffer, cl->buffer_size);
-    fprintf(stdout, "[Send log]: message: ");
-    debug_buffer(temp,0);
+    DEBUG_LOG("[Send log]: message: ");
+    DEBUG_BUFFER(cl->send_buffer, strlen(cl->send_buffer));
     return 0;
 }
 
@@ -228,10 +227,8 @@ int handle_request(struct pollfd *pfds, int i, int *pfdscount, struct client *cl
 {
     cls[i].recieved_size = recv(pfds[i].fd, cls[i].recv_buf, B_SIZE, 0);
     cls[i].recv_buf[cls[i].recieved_size] = '\0';
-#ifdef DBG
-    printf("recieved_size: %d\n",cls[i].recieved_size);
-    debug_buffer(cls[i].recv_buf,cls[i].recieved_size);
-#endif
+    DEBUG_LOG("recieved_size: %d\n", cls[i].recieved_size);
+    DEBUG_BUFFER(cls[i].recv_buf, cls[i].recieved_size);
     if (cls[i].recieved_size < 1)
     {
         if (handle_disconnect(pfds, i, pfdscount, cls) == EXIT_SUCCESS)
@@ -242,19 +239,17 @@ int handle_request(struct pollfd *pfds, int i, int *pfdscount, struct client *cl
         return 1;
     }
     int c; /* Argüman sayısı için sayaç */
-    char **args = redis_tokenizer(cls[i].recv_buf, cls[i].recieved_size,&c);
+    char **args = redis_tokenizer(cls[i].recv_buf, cls[i].recieved_size, &c);
     if (args == NULL)
         return -1;
-#ifdef DBG
-printf("\nargs count: %d\n",c);
+
+    DEBUG_LOG("args count: %d\n", c);
     for (int i = 0; i < c; i++)
     {
-        printf("args[%d]: ",i);
-        debug_buffer(args[i],100);
-        printf("\n");
-        fflush(stdout);
+        DEBUG_LOG("args[%d]: ", i);
+        DEBUG_BUFFER(args[i], strlen(args[i]));
     }
-#endif
+
     // Convert upper the instruction name
     to_upper(args[0]);
     // Get instruction and perform actions
@@ -262,7 +257,7 @@ printf("\nargs count: %d\n",c);
 
     instruction_handler(cmd, &c, hash_t, args, &cls[i]);
     // Deallocated the args in every loop
-    free_args_list(args,c);
+    free_args_list(args, c);
     return 0;
 }
 

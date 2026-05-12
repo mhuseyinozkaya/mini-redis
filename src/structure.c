@@ -7,6 +7,7 @@
 #include "server.h"
 #include "structure.h"
 #include "hash.h"
+#include "utils.h"
 
 Data *create_node(char *key, char *value)
 {
@@ -115,9 +116,7 @@ void append_node(Data **table, Data *node)
     unsigned int index = get_hash_index(node->key, TABLE_SIZE);
     if (table[index] != NULL)
     {
-#ifdef DBG
-        fprintf(stdout, "Collision detected, node will append the same index.\n");
-#endif
+        DEBUG_LOG("Collision detected, node will append the same index.\n");
         node->next = table[index];
     }
     table[index] = node;
