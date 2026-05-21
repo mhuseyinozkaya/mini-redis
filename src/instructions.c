@@ -89,7 +89,7 @@ void cmd_save(Data **table, unsigned int size,struct client *cl)
     handle_response_message(cl,INFO,"OK");
 }
 
-void cmd_load(Data **table)
+void cmd_load(Data **table, struct client *cl)
 {
     char *key;
     char *value;
@@ -110,6 +110,7 @@ void cmd_load(Data **table)
             append_node(table, p);
         }
     }
+    handle_response_message(cl,INFO,"OK");
     fclose(fp);
 }
 
@@ -143,7 +144,7 @@ void instruction_handler(COMMAND cmd ,int *c, Data **hash_t, char **args,struct 
             cmd_save(hash_t, TABLE_SIZE,cl);
             break;
         case CMD_LOAD:
-            cmd_load(hash_t);
+            cmd_load(hash_t,cl);
             break;
         case CMD_EXIT:
             cmd_exit(&keep_running);
