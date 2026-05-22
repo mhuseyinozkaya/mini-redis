@@ -70,45 +70,97 @@ char **input_tokenizer(char *str, int *c)
     return arr;
 }
 
-char **redis_tokenizer(char *buffer, int recvs, int *c)
-{
-    DEBUG_LOG("redis_tokenizer(): Decoding RESP...\n");
-    int i;
-    int number;
-    char *endptr;
-    char **args = NULL;
-    for (i = 0; i < recvs; ++i)
-    {
-        if(buffer[i] == '*'){
-            number = strtol(&buffer[i+1],&endptr,10);
-            *c = number; /* argcount */
-            i = endptr - buffer;
-            if(buffer[i] == '\r' && buffer[i+1] == '\n'){
-                args = malloc(sizeof(char*) * (*c));
-                DEBUG_LOG("Successfully allocated with argcount: %d\n",*c);
-                i+=2;
-                break;
-            }
-        }
-    }
-    for(int j=0; j < *c; ++j){
-        if(buffer[i] == '$'){
-            number = strtol(&buffer[i+1],&endptr,10);
-            i = endptr - buffer;
-            if(buffer[i] == '\r' && buffer[i+1] == '\n'){
-                i+=2;
-            }
+int _handle_buffer_pos(struct client *cl, int pos){
+    cl->recv_buf.pos = pos;
+    return 0;
+} 
 
-            if(buffer[i+number] == '\r' && buffer[i+number+1] == '\n'){
-                args[j] = strndup(&buffer[i],number);
-                i+=(number+2);
+/* return -1 on error */
+/* return 0 on success */
+/* return 1 on partial read */
+
+int resp_decoder(struct client *cl)
+{
+    char *buffer = cl->recv_buf.data;
+    int recvs = cl->recv_buf.size;
+    int i = 0;
+    int num = 0;      // array eleman sayısı (*N)
+    int arg_len = 0;  // bulk string uzunluğu ($N)
+    char *endptr;
+    while (i < recvs)
+    {
+        // find RESP array length
+        if (buffer[i] == '*')
+        {
+            if (i + 1 < recvs)
+                num = strtol(&buffer[i + 1], &endptr, 10);
+            else{
+                _handle_buffer_pos(cl,i+1);
+                return 1;
             }
+            i = endptr - buffer; // mutlak offset
+            if (i == 0)
+                return -1;
+            // memory allocate for args and set arg_count
+            if (i + 1 < recvs){
+                if (buffer[i] == '\r' && buffer[i + 1] == '\n')
+                {
+                    cl->queue_list.cmds[cl->queue_list.tail].arg_count = num;
+                    cl->queue_list.cmds[cl->queue_list.tail].args = malloc(sizeof(char *) * num);
+                    i += 2; // \r\n atla
+                }
+            }else{
+                _handle_buffer_pos(cl,i+1);
+                return -1;
+            }
+            // pass buffer to args
+            for (int j = 0; j < num; j++)
+            {
+                if (i < recvs){
+                    if (buffer[i] == '$')
+                    {
+                        arg_len = strtol(&buffer[i + 1], &endptr, 10);
+                        i = endptr - buffer;
+
+                        if ((i + 1) < recvs && buffer[i] == '\r' && buffer[i + 1] == '\n')
+                            i += 2;
+                        else{
+                            _handle_buffer_pos(cl,i+1);
+                            return 1;
+                        }
+                    }
+                }else{
+                    _handle_buffer_pos(cl,i+1);
+                    return 1;
+                }
+
+                if((i + arg_len + 1) < recvs){
+                    if (buffer[i + arg_len] == '\r' && buffer[i + arg_len + 1] == '\n')
+                    {
+                        cl->queue_list.cmds[cl->queue_list.tail].args[j] = strndup(&buffer[i], arg_len);
+                        i += (arg_len + 2);
+                    }
+                }else{
+                    int k = 0;
+                    while(i+k < recvs) k++;
+                    _handle_buffer_pos(cl,i+k);
+                    return 1;
+                }
+            }
+            // add commands to queue list to execute
+            cl->queue_list.tail = (cl->queue_list.tail + 1) % 16;
+            cl->queue_list.count++;
+        }
+        else
+        {
+            i++;
         }
     }
-    return args;
+    return 0;
 }
 
-int resp_simple(struct client *cl,const char* type, const char *payload){
-    cl->buffer_size = snprintf(cl->send_buffer,sizeof(cl->send_buffer),"%s%s\r\n",type,payload);
+int resp_simple(struct client *cl, const char *type, const char *payload)
+{
+    cl->buffer_size = snprintf(cl->send_buffer, sizeof(cl->send_buffer), "%s%s\r\n", type, payload);
     return 0;
 }

@@ -26,18 +26,33 @@
 // MAXIMUM buffer size
 #define B_SIZE 4096
 
+struct cmd_args{
+    char **args;
+    int arg_count;
+    unsigned int is_half: 1;
+};
+
+struct queue{
+    /* Geçerli komutların sırayla çalıştırmak için saklanacak kuyruk veriyapısı */
+    struct cmd_args cmds[16];
+    /* Komutlar head'in gösterdiği yerden sırayla çalıştırılacak */
+    int head;
+    int tail;
+    int count;
+};
+struct buffer{
+    char data[B_SIZE];
+    int size;
+    int pos;
+};
 struct client
 {
     struct sockaddr_storage addr;
     socklen_t addrlen;
-    char send_buf[B_SIZE];
-    char recv_buf[B_SIZE];
     int fd;
-    int recieved_size;
-    int sended_size;
-    int data_to_send;
-    void *client_memory;
-    char **args;
+    struct queue queue_list;
+    struct buffer recv_buf;
+    struct buffer send_buf;
     /* Bu yapı sonradan kaldırılacak mevcut kodu bozmamak için şuan duracak */
     char send_buffer[B_SIZE];
     int buffer_size;

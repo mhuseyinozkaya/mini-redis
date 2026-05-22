@@ -223,13 +223,34 @@ int handle_disconnect(struct pollfd *pfds, int i, int *pfdscount, struct client 
     (*pfdscount)--;
     return 0;
 }
+
+/* Gelen mesajı buffere kaydet */
+/* Fonksiyon buffer_pos değerine göre okuma yapıyor, bufferin doluluğu buradan anlaşılacak */
+/* Eğer bufferda önceden gelen yarım komut varsa üstüne tam yazma */
+    /* Ve buffer boyutu kontrolünü sağlayarak oku */
+int _recv_buffer(struct client *cl)
+{
+    int rs;
+    // Bufferda önceden kalan veri var
+    /* if(cl->recv_buf.pos > 0){
+        rs = recv(cl->fd, )
+    } */
+    // Buffer tamamen boşaltılıyor
+    rs = recv(cl->fd, cl->recv_buf.data,B_SIZE-1, 0);
+    cl->recv_buf.data[rs] = '\0';
+    cl->recv_buf.size = rs;
+    DEBUG_LOG("recieved_size: %d, ", rs);
+    DEBUG_BUFFER(cl->recv_buf.data, rs);
+    return rs;
+}
+
 int handle_request(struct pollfd *pfds, int i, int *pfdscount, struct client *cls, Data **hash_t)
 {
-    cls[i].recieved_size = recv(pfds[i].fd, cls[i].recv_buf, B_SIZE, 0);
-    cls[i].recv_buf[cls[i].recieved_size] = '\0';
-    DEBUG_LOG("recieved_size: %d\n", cls[i].recieved_size);
-    DEBUG_BUFFER(cls[i].recv_buf, cls[i].recieved_size);
-    if (cls[i].recieved_size < 1)
+    /* client */
+    struct client *cl = &cls[i];
+    // If client sent less than 1 byte then it should be disconnected
+    int rs = _recv_buffer(cl);
+    if (rs == 0)
     {
         if (handle_disconnect(pfds, i, pfdscount, cls) == EXIT_SUCCESS)
         {
@@ -238,26 +259,38 @@ int handle_request(struct pollfd *pfds, int i, int *pfdscount, struct client *cl
         }
         return 1;
     }
-    int c; /* Argüman sayısı için sayaç */
-    char **args = redis_tokenizer(cls[i].recv_buf, cls[i].recieved_size, &c);
-    if (args == NULL)
-        return -1;
+    else if(rs < 0){
+        // EAGAIN, EINTR kontrolü yapılacak
+        DEBUG_LOG("An error occured: %d\n",rs);
+    }
+    // Otherwise continue to decode client message
+    if(resp_decoder(cl) != EXIT_SUCCESS)
+        DEBUG_LOG("REDIS DECODER FAILED\n");
 
-    DEBUG_LOG("args count: %d\n", c);
-    for (int i = 0; i < c; i++)
-    {
-        DEBUG_LOG("args[%d]: ", i);
-        DEBUG_BUFFER(args[i], strlen(args[i]));
+    // SEND OPTIMIZASYON YAPILACAK
+    while(cl->queue_list.count > 0){
+        for (int i = 0; i < cl->queue_list.cmds[cl->queue_list.head].arg_count; i++)
+        {
+            DEBUG_LOG("args[%d]: ", i);
+            DEBUG_BUFFER(cl->queue_list.cmds[cl->queue_list.head].args[i], strlen(cl->queue_list.cmds[cl->queue_list.head].args[i]));
+        }
+        // Convert upper the instruction name
+        to_upper(cl->queue_list.cmds[cl->queue_list.head].args[0]);
+        // Get instruction and perform actions
+        COMMAND cmd = get_instruction(cl->queue_list.cmds[cl->queue_list.head].args[0]);
+        instruction_handler(cmd, &cl->queue_list.cmds[cl->queue_list.head].arg_count, hash_t, cl->queue_list.cmds[cl->queue_list.head].args, &cls[i]);
+        // Deallocated the args in every loop
+        free_args_list(cl->queue_list.cmds[cl->queue_list.head].args,cl->queue_list.cmds[cl->queue_list.head].arg_count);
+        cl->queue_list.count--;
+        cl->queue_list.head++;
+
+        send_response(&pfds[i], &cls[i]);
+    }
+    if(cl->queue_list.count == 0){
+        cl->queue_list.head = 0;
+        cl->queue_list.tail = 0;
     }
 
-    // Convert upper the instruction name
-    to_upper(args[0]);
-    // Get instruction and perform actions
-    COMMAND cmd = get_instruction(args[0]);
-
-    instruction_handler(cmd, &c, hash_t, args, &cls[i]);
-    // Deallocated the args in every loop
-    free_args_list(args, c);
     return 0;
 }
 
@@ -273,8 +306,6 @@ void handle_poll_events(struct pollfd *pfds, int *pfdscount, struct client *clie
             {
                 if (handle_request(pfds, i, pfdscount, clients, hash_t) == 1)
                     i--;
-                else
-                    send_response(&pfds[i], &clients[i]);
             }
         }
     }
