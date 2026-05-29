@@ -10,6 +10,8 @@
 #include <netdb.h>
 #include <poll.h>
 #include <netinet/tcp.h>
+#include <fcntl.h>
+#include <time.h>
 
 #include "structure.h"
 #include "server.h"
@@ -144,6 +146,11 @@ void handle_new_connection(struct pollfd *pfds, int *pfdscount, struct client *c
     socklen_t client_addrlen = sizeof client_addr;
 
     int clientfd = accept(pfds[0].fd, (struct sockaddr *)&client_addr, &client_addrlen);
+
+    /* Non-blocking mode */
+    int flags = fcntl(clientfd, F_GETFL, 0);
+    fcntl(clientfd, F_SETFL, flags | O_NONBLOCK);
+
     // TCP_NODELAY Ayarı
     int opt = 1;
     setsockopt(clientfd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
@@ -184,35 +191,54 @@ int handle_response_message(struct client *cl, MSG_TYPE msg_type, const char *fo
         resp_simple(cl, "-", temp);
         break;
     case NIL:
-        cl->buffer_size = snprintf(cl->send_buffer, sizeof(cl->send_buffer), "$-1\r\n");
+        cl->send_buf.size = snprintf(cl->send_buf.data, sizeof(cl->send_buf.data), "$-1\r\n");
         break;
     case INFO:
         resp_simple(cl, "+", temp);
         break;
     case BULK_STRING:
-        cl->buffer_size = snprintf(cl->send_buffer, sizeof(cl->send_buffer), "%s", temp);
+        cl->send_buf.size = snprintf(cl->send_buf.data, sizeof(cl->send_buf.data), "%s", temp);
         break;
     default:
         break;
     }
 
     DEBUG_LOG("[Send log]: message: ");
-    DEBUG_BUFFER(cl->send_buffer, strlen(cl->send_buffer));
+    DEBUG_BUFFER(cl->send_buf.data, strlen(cl->send_buf.data));
     return 0;
 }
 
-int send_response(struct pollfd *pfds, struct client *cl)
+int send_response(struct pollfd *pfd, struct client *cl)
 {
-    int ss = send(pfds->fd, cl->send_buffer, cl->buffer_size, MSG_NOSIGNAL);
-    if (ss == -1)
+    int space = cl->send_buf.size - cl->send_buf.pos;
+#ifdef PARTIAL
+    space = rand() % 9 + 1;
+    if(cl->send_buf.size < space)
+        space = cl->send_buf.size;
+#endif
+    // Send buffer to client
+    int sent_s = send(pfd->fd, cl->send_buf.data, space, MSG_NOSIGNAL);
+    // An error occured, Check with EAGAIN EWOULDBLOCK
+    if (sent_s == -1)
     {
+        return -1;
+    }
+
+    // If entire buffer could not be sent, try in next iteration
+    if (sent_s < cl->send_buf.size)
+    {
+        fprintf(stderr, "Number of bytes sent the client: %d, but expected %d\n", sent_s, cl->send_buf.size);
+        // Free sent bytes from buffer
+        int remaining_bytes = cl->send_buf.size - sent_s;
+        memmove(cl->send_buf.data, &cl->send_buf.data[sent_s] ,remaining_bytes);
+
+        cl->send_buf.size = remaining_bytes;
+        pfd->events |= POLLOUT; // Set POLLOUT flag for the send partial buffer in next iteration
         return 1;
     }
-    if (ss < cl->buffer_size)
-    {
-        fprintf(stderr, " <%d> bytes sent the client, the expected <%d>\n", ss, cl->buffer_size);
-        return 2;
-    }
+    cl->send_buf.size = 0;
+    cl->send_buf.pos = 0;
+    pfd->events &= ~POLLOUT; // Set zero POLLOUT flag
     return 0;
 }
 
@@ -228,6 +254,9 @@ int _recv_buffer(struct client *cl)
 {
     int rs;
     int space = B_SIZE - 1 - cl->recv_buf.size;
+#ifdef PARTIAL
+    space = rand() % 9 + 1;
+#endif
     rs = recv(cl->fd, cl->recv_buf.data + cl->recv_buf.size, space, 0);
     if (rs <= 0)
         return rs;
@@ -238,6 +267,37 @@ int _recv_buffer(struct client *cl)
     DEBUG_LOG("recieved_size: %d, ", rs);
     DEBUG_BUFFER(cl->recv_buf.data, cl->recv_buf.size);
     return rs;
+}
+
+int execute_queue_cmds(struct pollfd *pfd, struct client *cl, Data **hash_t){
+    while (cl->queue_list.count > 0)
+    {
+        for (int i = 0; i < cl->queue_list.cmds[cl->queue_list.head].arg_count; i++)
+        {
+            DEBUG_LOG("args[%d]: ", i);
+            DEBUG_BUFFER(cl->queue_list.cmds[cl->queue_list.head].args[i], strlen(cl->queue_list.cmds[cl->queue_list.head].args[i]));
+        }
+        // Convert upper the instruction name
+        to_upper(cl->queue_list.cmds[cl->queue_list.head].args[0]);
+        // Get instruction and perform actions
+        COMMAND cmd = get_instruction(cl->queue_list.cmds[cl->queue_list.head].args[0]);
+        instruction_handler(cmd, &cl->queue_list.cmds[cl->queue_list.head].arg_count, hash_t, cl->queue_list.cmds[cl->queue_list.head].args, cl);
+        // Deallocated the args in every loop
+        free_args_list(cl->queue_list.cmds[cl->queue_list.head].args, cl->queue_list.cmds[cl->queue_list.head].arg_count);
+        cl->queue_list.cmds[cl->queue_list.head].args = NULL;
+        cl->queue_list.cmds[cl->queue_list.head].arg_count = 0;
+        cl->queue_list.count--;
+        cl->queue_list.head++;
+
+        send_response(pfd, cl);
+    }
+    if (cl->queue_list.count == 0)
+    {
+        cl->queue_list.head = 0;
+        cl->queue_list.tail = 0;
+    }
+
+    return 0;
 }
 
 int handle_request(struct pollfd *pfds, int i, int *pfdscount, struct client *cls, Data **hash_t)
@@ -265,43 +325,31 @@ int handle_request(struct pollfd *pfds, int i, int *pfdscount, struct client *cl
     if (ret == -1)
         DEBUG_LOG("BUFFER PARTIALLY READED\n");
     DEBUG_LOG("queue count after decode: %d\n", cl->queue_list.count);
-    // SEND OPTIMIZASYON YAPILACAK
-    while (cl->queue_list.count > 0)
-    {
-        for (int i = 0; i < cl->queue_list.cmds[cl->queue_list.head].arg_count; i++)
-        {
-            DEBUG_LOG("args[%d]: ", i);
-            DEBUG_BUFFER(cl->queue_list.cmds[cl->queue_list.head].args[i], strlen(cl->queue_list.cmds[cl->queue_list.head].args[i]));
-        }
-        // Convert upper the instruction name
-        to_upper(cl->queue_list.cmds[cl->queue_list.head].args[0]);
-        // Get instruction and perform actions
-        COMMAND cmd = get_instruction(cl->queue_list.cmds[cl->queue_list.head].args[0]);
-        instruction_handler(cmd, &cl->queue_list.cmds[cl->queue_list.head].arg_count, hash_t, cl->queue_list.cmds[cl->queue_list.head].args, &cls[i]);
-        // Deallocated the args in every loop
-        free_args_list(cl->queue_list.cmds[cl->queue_list.head].args, cl->queue_list.cmds[cl->queue_list.head].arg_count);
-        cl->queue_list.cmds[cl->queue_list.head].args = NULL;
-        cl->queue_list.cmds[cl->queue_list.head].arg_count = 0;
-        cl->queue_list.count--;
-        cl->queue_list.head++;
 
-        send_response(&pfds[i], &cls[i]);
-    }
-    if (cl->queue_list.count == 0)
-    {
-        cl->queue_list.head = 0;
-        cl->queue_list.tail = 0;
-    }
+    // SEND OPTIMIZASYON YAPILACAK
+    execute_queue_cmds(&pfds[i],cl,hash_t);
 
     return 0;
 }
 
 void handle_poll_events(struct pollfd *pfds, int *pfdscount, struct client *clients, Data **hash_t)
 {
+    /* Set rand() seed */
+    srand(time(NULL));
+
     for (int i = 0; i < (*pfdscount); i++)
     {
+        if(pfds[i].revents & POLLOUT){
+            // Send client the previous iteration's buffer
+            DEBUG_LOG("YARIM KALAN BUFFER GONDERMESI TETIKLENDI\n");
+            if(clients[i].send_buf.size > 0){
+                if(send_response(&pfds[i],&clients[i]) == 1)
+                    continue;
+            }
+        }
         if (pfds[i].revents & (POLLIN | POLLHUP | POLLERR))
         {
+            // If any event occured in listener socket, accept new connection
             if (i == 0)
                 handle_new_connection(pfds, pfdscount, clients);
             else

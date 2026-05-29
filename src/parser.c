@@ -219,6 +219,6 @@ int resp_decoder(struct client *cl)
 
 int resp_simple(struct client *cl, const char *type, const char *payload)
 {
-    cl->buffer_size = snprintf(cl->send_buffer, sizeof(cl->send_buffer), "%s%s\r\n", type, payload);
+    cl->send_buf.size = snprintf(cl->send_buf.data, sizeof(cl->send_buf.data), "%s%s\r\n", type, payload);
     return 0;
 }

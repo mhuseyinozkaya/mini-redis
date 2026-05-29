@@ -24,7 +24,7 @@
 #define SIZE_CLIENTS DEFAULT_MAX_CLIENTS
 
 // MAXIMUM buffer size
-#define B_SIZE 4096
+#define B_SIZE 5242890
 
 enum buffer_state
 {
@@ -51,7 +51,11 @@ struct queue
 struct buffer
 {
     char data[B_SIZE];
+    /* Client'e gönderilmek istenen boyut */
+    /* Istemciden okunan gerçek boyut */
     int size;
+    /* Client'e gönderilebilen gerçek boyut */
+    /* Yarım bufferin hangi pozisyondan sonra okumaya devam edeceği */
     int pos;
 };
 struct client
@@ -68,10 +72,6 @@ struct client
     struct queue queue_list;
     struct buffer recv_buf;
     struct buffer send_buf;
-    /* Bu yapı sonradan kaldırılacak mevcut kodu bozmamak için şuan duracak */
-    char send_buffer[B_SIZE];
-    int buffer_size;
-    /* Bu yapı sonradan kaldırılacak mevcut kodu bozmamak için şuan duracak */
 };
 typedef enum message_type
 {
