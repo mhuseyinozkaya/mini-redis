@@ -5,6 +5,8 @@
 
 void free_args_list(char **args, int n)
 {
+    if (args == NULL)
+        return;
     for (int i = 0; i < n; ++i)
     {
         free(args[i]);

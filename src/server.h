@@ -26,13 +26,21 @@
 // MAXIMUM buffer size
 #define B_SIZE 4096
 
-struct cmd_args{
-    char **args;
-    int arg_count;
-    unsigned int is_half: 1;
+enum buffer_state
+{
+    STATE_ARRAY_HEADER,
+    STATE_BULK_HEADER,
+    STATE_BULK_DATA,
 };
 
-struct queue{
+struct cmd_args
+{
+    char **args;
+    int arg_count;
+};
+
+struct queue
+{
     /* Geçerli komutların sırayla çalıştırmak için saklanacak kuyruk veriyapısı */
     struct cmd_args cmds[16];
     /* Komutlar head'in gösterdiği yerden sırayla çalıştırılacak */
@@ -40,7 +48,8 @@ struct queue{
     int tail;
     int count;
 };
-struct buffer{
+struct buffer
+{
     char data[B_SIZE];
     int size;
     int pos;
@@ -50,6 +59,12 @@ struct client
     struct sockaddr_storage addr;
     socklen_t addrlen;
     int fd;
+    /* Finite State Machine */
+    int current_arg;
+    int expected_args;
+    int expected_len;
+    enum buffer_state parse_state;
+    /* Finite State Machine */
     struct queue queue_list;
     struct buffer recv_buf;
     struct buffer send_buf;
@@ -58,13 +73,14 @@ struct client
     int buffer_size;
     /* Bu yapı sonradan kaldırılacak mevcut kodu bozmamak için şuan duracak */
 };
-typedef enum message_type{
+typedef enum message_type
+{
     ERROR = -1,
     NIL,
     INFO,
     BULK_STRING,
     ARRAY
-}MSG_TYPE;
+} MSG_TYPE;
 
 int handle_response_message(struct client *cl, MSG_TYPE message_type, const char *format, ...);
 int get_local_addr(struct addrinfo **res, char *port);
@@ -81,7 +97,7 @@ int remove_from_poll(struct pollfd *pfds, int i, int *pfdscount);
 
 int handle_request(struct pollfd *pfds, int i, int *pfdscount, struct client *cl, Data **hash_t);
 void handle_poll_events(struct pollfd *pfds, int *pfdscount, struct client *cl, Data **hash_t);
-void handle_new_connection(struct pollfd *pfds, int *pfdscount,struct client *clients);
+void handle_new_connection(struct pollfd *pfds, int *pfdscount, struct client *clients);
 
 struct client *init_clients(int fd, int size);
 struct pollfd *init_poll(int *pfdscount, int sockfd, int size);

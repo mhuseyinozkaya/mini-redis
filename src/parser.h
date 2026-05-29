@@ -21,7 +21,6 @@ typedef enum command
     CMD_EXIT
 } COMMAND;
 
-
 void to_upper(char *str);
 void to_lower(char *str);
 
@@ -29,5 +28,5 @@ COMMAND get_instruction(char *str);
 char **input_tokenizer(char *str, int *c);
 int resp_decoder(struct client *cl);
 
-int resp_simple(struct client *cl,const char* type, const char *payload);
+int resp_simple(struct client *cl, const char *type, const char *payload);
 #endif

@@ -224,23 +224,19 @@ int handle_disconnect(struct pollfd *pfds, int i, int *pfdscount, struct client 
     return 0;
 }
 
-/* Gelen mesajı buffere kaydet */
-/* Fonksiyon buffer_pos değerine göre okuma yapıyor, bufferin doluluğu buradan anlaşılacak */
-/* Eğer bufferda önceden gelen yarım komut varsa üstüne tam yazma */
-    /* Ve buffer boyutu kontrolünü sağlayarak oku */
 int _recv_buffer(struct client *cl)
 {
     int rs;
-    // Bufferda önceden kalan veri var
-    /* if(cl->recv_buf.pos > 0){
-        rs = recv(cl->fd, )
-    } */
-    // Buffer tamamen boşaltılıyor
-    rs = recv(cl->fd, cl->recv_buf.data,B_SIZE-1, 0);
-    cl->recv_buf.data[rs] = '\0';
-    cl->recv_buf.size = rs;
+    int space = B_SIZE - 1 - cl->recv_buf.size;
+    rs = recv(cl->fd, cl->recv_buf.data + cl->recv_buf.size, space, 0);
+    if (rs <= 0)
+        return rs;
+
+    cl->recv_buf.size += rs;
+    cl->recv_buf.data[cl->recv_buf.size] = '\0';
+
     DEBUG_LOG("recieved_size: %d, ", rs);
-    DEBUG_BUFFER(cl->recv_buf.data, rs);
+    DEBUG_BUFFER(cl->recv_buf.data, cl->recv_buf.size);
     return rs;
 }
 
@@ -259,16 +255,19 @@ int handle_request(struct pollfd *pfds, int i, int *pfdscount, struct client *cl
         }
         return 1;
     }
-    else if(rs < 0){
+    else if (rs < 0)
+    {
         // EAGAIN, EINTR kontrolü yapılacak
-        DEBUG_LOG("An error occured: %d\n",rs);
+        DEBUG_LOG("An error occured: %d\n", rs);
     }
     // Otherwise continue to decode client message
-    if(resp_decoder(cl) != EXIT_SUCCESS)
-        DEBUG_LOG("REDIS DECODER FAILED\n");
-
+    int ret = resp_decoder(cl);
+    if (ret == -1)
+        DEBUG_LOG("BUFFER PARTIALLY READED\n");
+    DEBUG_LOG("queue count after decode: %d\n", cl->queue_list.count);
     // SEND OPTIMIZASYON YAPILACAK
-    while(cl->queue_list.count > 0){
+    while (cl->queue_list.count > 0)
+    {
         for (int i = 0; i < cl->queue_list.cmds[cl->queue_list.head].arg_count; i++)
         {
             DEBUG_LOG("args[%d]: ", i);
@@ -280,13 +279,16 @@ int handle_request(struct pollfd *pfds, int i, int *pfdscount, struct client *cl
         COMMAND cmd = get_instruction(cl->queue_list.cmds[cl->queue_list.head].args[0]);
         instruction_handler(cmd, &cl->queue_list.cmds[cl->queue_list.head].arg_count, hash_t, cl->queue_list.cmds[cl->queue_list.head].args, &cls[i]);
         // Deallocated the args in every loop
-        free_args_list(cl->queue_list.cmds[cl->queue_list.head].args,cl->queue_list.cmds[cl->queue_list.head].arg_count);
+        free_args_list(cl->queue_list.cmds[cl->queue_list.head].args, cl->queue_list.cmds[cl->queue_list.head].arg_count);
+        cl->queue_list.cmds[cl->queue_list.head].args = NULL;
+        cl->queue_list.cmds[cl->queue_list.head].arg_count = 0;
         cl->queue_list.count--;
         cl->queue_list.head++;
 
         send_response(&pfds[i], &cls[i]);
     }
-    if(cl->queue_list.count == 0){
+    if (cl->queue_list.count == 0)
+    {
         cl->queue_list.head = 0;
         cl->queue_list.tail = 0;
     }

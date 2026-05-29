@@ -70,10 +70,33 @@ char **input_tokenizer(char *str, int *c)
     return arr;
 }
 
-int _handle_buffer_pos(struct client *cl, int pos){
+int _handle_buffer_pos(struct client *cl, int pos)
+{
     cl->recv_buf.pos = pos;
     return 0;
-} 
+}
+/* if overflow occurs then returns -1 */
+/* if success then returns 0 */
+/* if CRLF not checked then 1 */
+int check_crlf(char *ptr, int *index, int *offset, int size)
+{
+    int dummy = 0x0;
+    if (offset == NULL)
+    {
+        offset = &dummy;
+    }
+    if ((*index + *offset + 1) < size)
+    {
+        if (ptr[*index + *offset] == '\r' && ptr[*index + *offset + 1] == '\n')
+            // Jump next of \r\n pointer index
+            *index = (*index + *offset + 2);
+        else
+            return 1;
+    }
+    else
+        return -1;
+    return EXIT_SUCCESS;
+}
 
 /* return -1 on error */
 /* return 0 on success */
@@ -83,79 +106,114 @@ int resp_decoder(struct client *cl)
 {
     char *buffer = cl->recv_buf.data;
     int recvs = cl->recv_buf.size;
-    int i = 0;
-    int num = 0;      // array eleman sayısı (*N)
-    int arg_len = 0;  // bulk string uzunluğu ($N)
+    int i = cl->recv_buf.pos;
     char *endptr;
+    int ret;
+    int start; /* her case'in başlangıç pozisyonu */
+
+    DEBUG_LOG("resp_decoder start: i=%d, size=%d, state=%d\n",
+              cl->recv_buf.pos, cl->recv_buf.size, cl->parse_state);
+
     while (i < recvs)
     {
-        // find RESP array length
-        if (buffer[i] == '*')
+        switch (cl->parse_state)
         {
-            if (i + 1 < recvs)
-                num = strtol(&buffer[i + 1], &endptr, 10);
-            else{
-                _handle_buffer_pos(cl,i+1);
-                return 1;
-            }
-            i = endptr - buffer; // mutlak offset
-            if (i == 0)
-                return -1;
-            // memory allocate for args and set arg_count
-            if (i + 1 < recvs){
-                if (buffer[i] == '\r' && buffer[i + 1] == '\n')
-                {
-                    cl->queue_list.cmds[cl->queue_list.tail].arg_count = num;
-                    cl->queue_list.cmds[cl->queue_list.tail].args = malloc(sizeof(char *) * num);
-                    i += 2; // \r\n atla
-                }
-            }else{
-                _handle_buffer_pos(cl,i+1);
-                return -1;
-            }
-            // pass buffer to args
-            for (int j = 0; j < num; j++)
+        case STATE_ARRAY_HEADER:
+            if (buffer[i] != '*')
             {
-                if (i < recvs){
-                    if (buffer[i] == '$')
-                    {
-                        arg_len = strtol(&buffer[i + 1], &endptr, 10);
-                        i = endptr - buffer;
-
-                        if ((i + 1) < recvs && buffer[i] == '\r' && buffer[i + 1] == '\n')
-                            i += 2;
-                        else{
-                            _handle_buffer_pos(cl,i+1);
-                            return 1;
-                        }
-                    }
-                }else{
-                    _handle_buffer_pos(cl,i+1);
-                    return 1;
-                }
-
-                if((i + arg_len + 1) < recvs){
-                    if (buffer[i + arg_len] == '\r' && buffer[i + arg_len + 1] == '\n')
-                    {
-                        cl->queue_list.cmds[cl->queue_list.tail].args[j] = strndup(&buffer[i], arg_len);
-                        i += (arg_len + 2);
-                    }
-                }else{
-                    int k = 0;
-                    while(i+k < recvs) k++;
-                    _handle_buffer_pos(cl,i+k);
-                    return 1;
-                }
+                i++;
+                break;
             }
-            // add commands to queue list to execute
-            cl->queue_list.tail = (cl->queue_list.tail + 1) % 16;
-            cl->queue_list.count++;
-        }
-        else
-        {
-            i++;
+            start = i; /* '*' pozisyonunu kaydet */
+
+            if (i + 1 >= recvs)
+            {
+                _handle_buffer_pos(cl, start);
+                return -1;
+            }
+
+            cl->expected_args = strtol(&buffer[i + 1], &endptr, 10);
+            i = endptr - buffer;
+
+            ret = check_crlf(buffer, &i, NULL, recvs);
+            if (ret != 0)
+            {
+                _handle_buffer_pos(cl, start);
+                return -1;
+            }
+
+            cl->current_arg = 0;
+            /* daha önce malloc yapılmadıysa yap */
+            if (cl->queue_list.cmds[cl->queue_list.tail].args == NULL)
+                cl->queue_list.cmds[cl->queue_list.tail].args =
+                    malloc(sizeof(char *) * cl->expected_args);
+            cl->queue_list.cmds[cl->queue_list.tail].arg_count = cl->expected_args;
+            cl->parse_state = STATE_BULK_HEADER;
+            break;
+
+        case STATE_BULK_HEADER:
+            start = i; /* '$' pozisyonunu kaydet */
+
+            if (buffer[i] != '$')
+            {
+                _handle_buffer_pos(cl, start);
+                return -1;
+            }
+            if (i + 1 >= recvs)
+            {
+                _handle_buffer_pos(cl, start);
+                return -1;
+            }
+
+            cl->expected_len = strtol(&buffer[i + 1], &endptr, 10);
+            i = endptr - buffer;
+
+            ret = check_crlf(buffer, &i, NULL, recvs);
+            if (ret != 0)
+            {
+                _handle_buffer_pos(cl, start);
+                return -1;
+            }
+
+            cl->parse_state = STATE_BULK_DATA;
+            break;
+
+        case STATE_BULK_DATA:
+            start = i; /* verinin başlangıcını kaydet */
+
+            ret = check_crlf(buffer, &i, &cl->expected_len, recvs);
+            if (ret != 0)
+            {
+                _handle_buffer_pos(cl, start);
+                return -1;
+            }
+
+            /* check_crlf i'yi expected_len+2 ilerletti, veri start'tan başlıyor */
+            cl->queue_list.cmds[cl->queue_list.tail].args[cl->current_arg] =
+                strndup(&buffer[start], cl->expected_len);
+
+            cl->current_arg++;
+            if (cl->current_arg == cl->expected_args)
+            {
+                cl->queue_list.tail = (cl->queue_list.tail + 1) % 16;
+                cl->queue_list.count++;
+                cl->current_arg = 0;
+                cl->expected_args = 0;
+                cl->parse_state = STATE_ARRAY_HEADER;
+            }
+            else
+            {
+                cl->parse_state = STATE_BULK_HEADER;
+            }
+            break;
+
+        default:
+            return -2;
         }
     }
+
+    cl->recv_buf.size = 0;
+    cl->recv_buf.pos = 0;
     return 0;
 }
 
